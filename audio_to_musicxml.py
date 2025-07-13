@@ -108,10 +108,11 @@ class AudioToMusicXMLConverter:
     
     def _requires_mono_processing(self) -> bool:
         """Check if any current transformations require mono processing"""
-        # Most transformations in librosa work fine with stereo, but some require mono
+        # Most transformations now work fine with stereo through channel iteration
+        # Only very specific analysis-based transforms might require mono
         mono_requiring_transforms = [
-            'harmonic_only', 'percussive_only', 'harmonic_percussive_ratio',
-            'granular_synthesis'  # Our custom implementation assumes mono
+            # Currently no transforms require mono - all handle stereo properly
+            # If we add transforms that genuinely need mono, add them here
         ]
         
         # Check if any transforms that require mono are enabled and set to True
@@ -329,18 +330,20 @@ class AudioToMusicXMLConverter:
                 print("  Applying granular synthesis")
             
             if processed_audio.ndim == 2:
-                # Convert to mono for granular processing, then restore stereo
-                mono_audio = np.mean(processed_audio, axis=0)
-                grains = []
-                for i in range(0, len(mono_audio) - grain_size, grain_size // 2):
-                    grain = mono_audio[i:i + grain_size]
-                    # Random pitch shift per grain
-                    shift = random.uniform(-2, 2)
-                    grain = librosa.effects.pitch_shift(grain, sr=self.sample_rate, n_steps=shift)
-                    grains.append(grain)
-                processed_mono = np.concatenate(grains)[:len(mono_audio)]
-                # Restore to stereo by copying mono to both channels
-                processed_audio = np.array([processed_mono, processed_mono])
+                # Process each stereo channel separately to maintain true stereo
+                processed_channels = []
+                for channel in range(processed_audio.shape[0]):
+                    channel_audio = processed_audio[channel]
+                    grains = []
+                    for i in range(0, len(channel_audio) - grain_size, grain_size // 2):
+                        grain = channel_audio[i:i + grain_size]
+                        # Random pitch shift per grain
+                        shift = random.uniform(-2, 2)
+                        grain = librosa.effects.pitch_shift(grain, sr=self.sample_rate, n_steps=shift)
+                        grains.append(grain)
+                    processed_channel = np.concatenate(grains)[:len(channel_audio)]
+                    processed_channels.append(processed_channel)
+                processed_audio = np.array(processed_channels)
             else:
                 grains = []
                 for i in range(0, len(processed_audio) - grain_size, grain_size // 2):
@@ -875,7 +878,7 @@ class AudioToMusicXMLConverter:
             preprocess_applied = preprocess_config and any(v for v in preprocess_config.values())
             
             audio, resampling_occurred = self.load_audio(file_path, user_sample_rate, 
-                                                    preserve_stereo=not transforms_applied)
+                                                    preserve_stereo=True)
             
             if self.config.get('verbose'):
                 print(f"Processing at sample rate: {self.sample_rate} Hz")
